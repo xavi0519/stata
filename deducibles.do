@@ -1,190 +1,102 @@
-#include <iostream>
-#include <iomanip>
-#include <cmath>
+clear all
+set more off
 
-using namespace std;
+*------------------------------------------------------------
+* 0. RUTAS DEL PROYECTO
+*------------------------------------------------------------
 
-// --- FUNCIONES DE VALIDACION ---
+global root "C:\Users\Yamilet\Documents\INTRODUCCION A LA ECONOMETRIA\TRABAJO ECONOMETRIA"
+global base "$root\Base Lista"
+global do "$root\Do"
+global tablas "$root\Tabla_Resultados"
+global outputs "$root\Outputs"
 
-bool ingreso_es_valido(double ingreso) {
-    if (cin.fail()) {
-        cout << "Error: Dato incorrecto. Ingrese un numero." << endl;
-        cin.clear();
-        cin.ignore(1000, '\n');
-        return false;
-    }
-    else if (ingreso < 0) {
-        cout << "Error: El ingreso nominal no puede ser negativo." << endl;
-        return false;
-    }
-    else {
-        return true;
-    }
-}
+cd "$root"
 
-bool inflacion_es_valida(double inflacion) {
-    if (cin.fail()) {
-        cout << "Error: Dato incorrecto. Ingrese un numero." << endl;
-        cin.clear();
-        cin.ignore(1000, '\n');
-        return false;
-    }
-    else if (inflacion < 0) {
-        // Asumimos que la inflacion acumulada del ejercicio no debe ser negativa
-        cout << "Error: La inflacion no debe ser negativa para este modelo." << endl;
-        return false;
-    }
-    else {
-        return true;
-    }
-}
+log using "$outputs\log_modelo_diagnostico.txt", text replace
 
-// --- FUNCION PRINCIPAL ---
+*------------------------------------------------------------
+* 1. ABRIR BASE FINAL LIMPIA
+*------------------------------------------------------------
 
-int main()
-{
-    // 1. Declaracion de constantes para la matriz
-    const int cantidadTiendas = 4;
-    const int cantidadMeses = 6;
+use "$base\base_enaho_2024_lista_para_MCO.dta", clear
 
-    // 2. Declaracion de matrices y arreglos
-    double ingresosNominales[cantidadTiendas][cantidadMeses]{ 0.0 };
-    double ingresosReales[cantidadTiendas][cantidadMeses]{ 0.0 };
-    double inflacion[cantidadMeses]{ 0.0 };
+* Revisar variables principales
+describe ln_salario educ_años exper exper2 mujer privado
+summarize ln_salario educ_años exper exper2 mujer privado
 
-    // Arreglos para almacenar los calculos por cada tienda
-    double crecRealProm[cantidadTiendas]{ 0.0 };
-    double crecNomTotal[cantidadTiendas]{ 0.0 };
-    double crecRealTotal[cantidadTiendas]{ 0.0 };
-    double erosion[cantidadTiendas]{ 0.0 };
+*------------------------------------------------------------
+* 2. RENOMBRAR EDUCACIÓN PARA EVITAR PROBLEMAS CON LA Ñ
+*------------------------------------------------------------
 
-    // 3. Ingreso de Datos
-    cout << "------ INGRESO DE DATOS ------" << endl << endl;
-    cout << "[Ingresos nominales (4 tiendas, 6 meses) ]:" << endl;
+capture rename educ_años educ_anios
+label variable educ_anios "Años de educación formal acumulados"
 
-    for (int i = 0; i < cantidadTiendas; i++) {
-        cout << "Tienda " << (i + 1) << ": ";
-        for (int j = 0; j < cantidadMeses; j++) {
-            do {
-                cin >> ingresosNominales[i][j];
-            } while (!ingreso_es_valido(ingresosNominales[i][j]));
-        }
-    }
+* Verificar que quedó bien
+describe ln_salario educ_anios exper exper2 mujer privado
+summarize ln_salario educ_anios exper exper2 mujer privado
 
-    cout << endl;
-    cout << "[Inflacion acumulada por mes (% respecto al mes 1)]:" << endl;
-    cout << "Inflacion por mes: ";
-    for (int j = 0; j < cantidadMeses; j++) {
-        do {
-            cin >> inflacion[j];
-        } while (!inflacion_es_valida(inflacion[j]));
-    }
+*------------------------------------------------------------
+* 3. MODELO MCO CONVENCIONAL
+*------------------------------------------------------------
 
-    // 4. Procesamiento de Calculos (Aplicando formulas)
-    for (int i = 0; i < cantidadTiendas; i++) {
-        for (int j = 0; j < cantidadMeses; j++) {
-            // Ingreso a precios del mes 1 (Deflactacion)
-            ingresosReales[i][j] = ingresosNominales[i][j] / (1.0 + (inflacion[j] / 100.0));
-        }
+regress ln_salario educ_anios exper exper2 mujer privado
 
-        // Crecimiento real promedio mensual (Media geometrica)
-        // Usamos la funcion pow() de <cmath>. Elevamos a (1/5) que es 0.2
-        crecRealProm[i] = (pow((ingresosReales[i][5] / ingresosReales[i][0]), 0.2) - 1.0) * 100.0;
+* Guardar estimación convencional
+estimates store MCO_simple
 
-        // Crecimiento nominal total (%)
-        crecNomTotal[i] = ((ingresosNominales[i][5] / ingresosNominales[i][0]) - 1.0) * 100.0;
+* Instalar outreg2 si no está instalado
+capture ssc install outreg2, replace
 
-        // Crecimiento real total (%)
-        crecRealTotal[i] = ((ingresosReales[i][5] / ingresosReales[i][0]) - 1.0) * 100.0;
+* Exportar primera columna: MCO convencional
+outreg2 using "$tablas\Tabla_Resultados_MCO.doc", replace word ///
+ctitle("MCO convencional") dec(4) se ///
+addnote("Errores estándar entre paréntesis.", ///
+"Variable dependiente: logaritmo natural del salario por hora.")
 
-        // Erosion inflacionaria
-        erosion[i] = crecNomTotal[i] - crecRealTotal[i];
-    }
+*------------------------------------------------------------
+* 3.1. TEST DE ESPECIFICACIÓN (RESET DE RAMSEY)
+*------------------------------------------------------------
+estat ovtest
 
-    // 5. Encontrar los indices de los valores mayores y menores
-    int indiceMayorCrecRealProm = 0;
-    int indiceMayorCrecNomTotal = 0;
-    int indiceMayorCrecRealTotal = 0;
-    int indiceMenorErosion = 0;
+*------------------------------------------------------------
+* 4. DIAGNÓSTICO DE MULTICOLINEALIDAD
+*------------------------------------------------------------
 
-    for (int i = 1; i < cantidadTiendas; i++) {
-        // Mayor crecimiento real promedio
-        if (crecRealProm[i] > crecRealProm[indiceMayorCrecRealProm]) {
-            indiceMayorCrecRealProm = i;
-        }
+vif
 
-        // Mayor crecimiento nominal
-        if (crecNomTotal[i] > crecNomTotal[indiceMayorCrecNomTotal]) {
-            indiceMayorCrecNomTotal = i;
-        }
+*------------------------------------------------------------
+* 5. TEST DE BREUSCH-PAGAN PARA HETEROCEDASTICIDAD
+*------------------------------------------------------------
 
-        // Mayor crecimiento real
-        if (crecRealTotal[i] > crecRealTotal[indiceMayorCrecRealTotal]) {
-            indiceMayorCrecRealTotal = i;
-        }
+estat hettest, rhs
 
-        // Menor erosion (el menos afectado)
-        if (erosion[i] < erosion[indiceMenorErosion]) {
-            indiceMenorErosion = i;
-        }
-    }
+*------------------------------------------------------------
+* 6. TEST DE WHITE PARA HETEROCEDASTICIDAD
+*------------------------------------------------------------
 
-    // 6. Impresion de Resultados
-    cout << endl;
-    cout << "------ RESUMEN FINANCIERO ------" << endl << endl;
+estat imtest, white
 
-    // Fijamos a 2 decimales
-    cout << fixed << setprecision(2);
+*------------------------------------------------------------
+* 7. MODELO MCO CON ERRORES ESTÁNDAR ROBUSTOS
+*------------------------------------------------------------
 
-    cout << "Ingresos reales (precios del mes 1):" << endl;
-    for (int i = 0; i < cantidadTiendas; i++) {
-        cout << "Tienda " << (i + 1) << ":";
-        for (int j = 0; j < cantidadMeses; j++) {
-            // Utilizamos setw(10) para separar las columnas
-            cout << setw(10) << ingresosReales[i][j];
-        }
-        cout << endl;
-    }
-    cout << endl;
+regress ln_salario educ_anios exper exper2 mujer privado, vce(robust)
 
-    cout << "Crecimiento real promedio mensual (%):" << endl;
-    for (int i = 0; i < cantidadTiendas; i++) {
-        cout << "Tienda " << (i + 1) << ": " << crecRealProm[i] << "%";
-        if (i == indiceMayorCrecRealProm) {
-            cout << " (mayor crecimiento promedio real)";
-        }
-        cout << endl;
-    }
-    cout << endl;
+* Guardar estimación robusta
+estimates store MCO_robusto
 
-    cout << "Crecimiento nominal total (%):" << endl;
-    for (int i = 0; i < cantidadTiendas; i++) {
-        cout << "Tienda " << (i + 1) << ": " << crecNomTotal[i] << "%";
-        if (i == indiceMayorCrecNomTotal) {
-            cout << " (mayor crecimiento nominal)";
-        }
-        cout << endl;
-    }
-    cout << endl;
+* Exportar segunda columna: MCO robusto
+outreg2 using "$tablas\Tabla_Resultados_MCO.doc", append word ///
+ctitle("MCO robusto") dec(4) se ///
+addnote("Errores estándar entre paréntesis.", ///
+"La columna MCO robusto utiliza errores estándar robustos a heterocedasticidad.", ///
+"*** p<0.01, ** p<0.05, * p<0.1")
 
-    cout << "Crecimiento real total (%):" << endl;
-    for (int i = 0; i < cantidadTiendas; i++) {
-        cout << "Tienda " << (i + 1) << ": " << crecRealTotal[i] << "%";
-        if (i == indiceMayorCrecRealTotal) {
-            cout << " (mayor crecimiento real)";
-        }
-        cout << endl;
-    }
-    cout << endl;
+*------------------------------------------------------------
+* 8. GUARDAR BASE CON VARIABLE RENOMBRADA
+*------------------------------------------------------------
 
-    cout << "Erosion inflacionaria (%):" << endl;
-    for (int i = 0; i < cantidadTiendas; i++) {
-        cout << "Tienda " << (i + 1) << ": " << erosion[i] << "%";
-        if (i == indiceMenorErosion) {
-            cout << " (el menos afectado por el indice de precios)";
-        }
-        cout << endl;
-    }
+save "$base\base_enaho_2024_lista_para_MCO_final.dta", replace
 
-    return 0;
-}
+log close
