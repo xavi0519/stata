@@ -1,106 +1,190 @@
-clear all
-set more off
+#include <iostream>
+#include <iomanip>
+#include <cmath>
 
-use "C:\Users\ALEX\Downloads\Bases METRIA\enaho01a-2024-500.dta", clear
+using namespace std;
 
-merge 1:1 conglome vivienda hogar codperso using "C:\Users\ALEX\Downloads\Bases METRIA\enaho01a-2024-300.dta"
- 
-tab _merge
-keep if _merge == 3
-drop _merge
-//p208 años de la persona 
- keep if p208a >= 14 & p208a <= 65
-lookfor ingreso
-lookfor ocupado
-//p501: trabajó la semana pasada.
-//p502: no trabajó, pero tenía empleo.
-//p503: hizo alguna actividad laboral menor o eventua
-tab p501
-tab p502
-tab p503
-//definir ocupados 
-gen ocupado = (p501==1 | p502==1 | p503==1)
-keep if ocupado == 1
-*Según el diccionario de la Enaho-500, la variable i524a1 representa el ingreso total anual
-drop if missing(i524a1) | i524a1 == 0 // Eliminamos todos los datos perdidos
-//ingresos positivos 
-keep if i524a1 > 0
+// --- FUNCIONES DE VALIDACION ---
 
-//-------------------------------------------------------------------------------------
-// CONSTRUCCIÓN DE VARIABLES
+bool ingreso_es_valido(double ingreso) {
+    if (cin.fail()) {
+        cout << "Error: Dato incorrecto. Ingrese un numero." << endl;
+        cin.clear();
+        cin.ignore(1000, '\n');
+        return false;
+    }
+    else if (ingreso < 0) {
+        cout << "Error: El ingreso nominal no puede ser negativo." << endl;
+        return false;
+    }
+    else {
+        return true;
+    }
+}
 
-// 1. Variable mujer (dummy)
-gen mujer = (p207 == 2) if p207 != .
-label variable mujer "1 = Mujer, 0 = Hombre"
+bool inflacion_es_valida(double inflacion) {
+    if (cin.fail()) {
+        cout << "Error: Dato incorrecto. Ingrese un numero." << endl;
+        cin.clear();
+        cin.ignore(1000, '\n');
+        return false;
+    }
+    else if (inflacion < 0) {
+        // Asumimos que la inflacion acumulada del ejercicio no debe ser negativa
+        cout << "Error: La inflacion no debe ser negativa para este modelo." << endl;
+        return false;
+    }
+    else {
+        return true;
+    }
+}
 
-// 2. Variable sector privado (Dummy)
+// --- FUNCION PRINCIPAL ---
 
-keep if p510 == 1 | p510 == 2 | p510 == 3 | p510 == 5 | p510 == 6
-gen privado = .
-replace privado = 0 if p510 == 1 | p510 == 2 | p510 == 3  // 0 = Sector Público (FF.AA., Admin y Empresa Pública)
-replace privado = 1 if p510 == 5 | p510 == 6              // 1 = Sector Privado (Services y Patrono Privado)
+int main()
+{
+    // 1. Declaracion de constantes para la matriz
+    const int cantidadTiendas = 4;
+    const int cantidadMeses = 6;
 
-label variable privado "1 = Sector Privado, 0 = Sector Público"
-label define lbl_sector 0 "Sector Público" 1 "Sector Privado"
-label values privado lbl_sector
+    // 2. Declaracion de matrices y arreglos
+    double ingresosNominales[cantidadTiendas][cantidadMeses]{ 0.0 };
+    double ingresosReales[cantidadTiendas][cantidadMeses]{ 0.0 };
+    double inflacion[cantidadMeses]{ 0.0 };
 
-// 3. Años de educación(Educ_Años)
-// Usamos p301a (nivel educativo) y p301b (año/grado de estudios)
-gen educ_años = .
+    // Arreglos para almacenar los calculos por cada tienda
+    double crecRealProm[cantidadTiendas]{ 0.0 };
+    double crecNomTotal[cantidadTiendas]{ 0.0 };
+    double crecRealTotal[cantidadTiendas]{ 0.0 };
+    double erosion[cantidadTiendas]{ 0.0 };
 
-// Sin nivel, Inicial o Básica Especial (Categorías 1, 2 y 12)
-replace educ_años = 0 if p301a == 1 | p301a == 2 | p301a == 12
+    // 3. Ingreso de Datos
+    cout << "------ INGRESO DE DATOS ------" << endl << endl;
+    cout << "[Ingresos nominales (4 tiendas, 6 meses) ]:" << endl;
 
-// Primaria Incompleta (Cat 3): Sumamos el último grado aprobado
-replace educ_años = p301b if p301a == 3 & p301b != .
+    for (int i = 0; i < cantidadTiendas; i++) {
+        cout << "Tienda " << (i + 1) << ": ";
+        for (int j = 0; j < cantidadMeses; j++) {
+            do {
+                cin >> ingresosNominales[i][j];
+            } while (!ingreso_es_valido(ingresosNominales[i][j]));
+        }
+    }
 
-// Primaria Completa (Cat 4): 6 años fijos
-replace educ_años = 6 if p301a == 4
+    cout << endl;
+    cout << "[Inflacion acumulada por mes (% respecto al mes 1)]:" << endl;
+    cout << "Inflacion por mes: ";
+    for (int j = 0; j < cantidadMeses; j++) {
+        do {
+            cin >> inflacion[j];
+        } while (!inflacion_es_valida(inflacion[j]));
+    }
 
-// Secundaria Incompleta (Cat 5): 6 años de primaria + grados aprobados en secundaria
-replace educ_años = 6 + p301b if p301a == 5 & p301b != .
+    // 4. Procesamiento de Calculos (Aplicando formulas)
+    for (int i = 0; i < cantidadTiendas; i++) {
+        for (int j = 0; j < cantidadMeses; j++) {
+            // Ingreso a precios del mes 1 (Deflactacion)
+            ingresosReales[i][j] = ingresosNominales[i][j] / (1.0 + (inflacion[j] / 100.0));
+        }
 
-// Secundaria Completa (Cat 6): 11 años fijos (6 prim + 5 secu)
-replace educ_años = 11 if p301a == 6
+        // Crecimiento real promedio mensual (Media geometrica)
+        // Usamos la funcion pow() de <cmath>. Elevamos a (1/5) que es 0.2
+        crecRealProm[i] = (pow((ingresosReales[i][5] / ingresosReales[i][0]), 0.2) - 1.0) * 100.0;
 
-// Superior No Universitaria Incompleta (Cat 7): 11 años + años técnicos
-replace educ_años = 11 + p301b if p301a == 7 & p301b != .
+        // Crecimiento nominal total (%)
+        crecNomTotal[i] = ((ingresosNominales[i][5] / ingresosNominales[i][0]) - 1.0) * 100.0;
 
-// Superior No Universitaria Completa (Cat 8): Asumimos 3 años de carrera técnica
-replace educ_años = 14 if p301a == 8
+        // Crecimiento real total (%)
+        crecRealTotal[i] = ((ingresosReales[i][5] / ingresosReales[i][0]) - 1.0) * 100.0;
 
-// Superior Universitaria Incompleta (Cat 9): 11 años + años en la universidad
-replace educ_años = 11 + p301b if p301a == 9 & p301b != .
+        // Erosion inflacionaria
+        erosion[i] = crecNomTotal[i] - crecRealTotal[i];
+    }
 
-// Superior Universitaria Completa (Cat 10): 16 años fijos (11 + 5 de carrera)
-replace educ_años = 16 if p301a == 10
+    // 5. Encontrar los indices de los valores mayores y menores
+    int indiceMayorCrecRealProm = 0;
+    int indiceMayorCrecNomTotal = 0;
+    int indiceMayorCrecRealTotal = 0;
+    int indiceMenorErosion = 0;
 
-// Maestría / Doctorado (Cat 11): 16 años de universidad + años de posgrado
-replace educ_años = 16 + p301b if p301a == 11 & p301b != .
+    for (int i = 1; i < cantidadTiendas; i++) {
+        // Mayor crecimiento real promedio
+        if (crecRealProm[i] > crecRealProm[indiceMayorCrecRealProm]) {
+            indiceMayorCrecRealProm = i;
+        }
 
-// Eliminamos a quienes no declararon educación (missings)
-drop if educ_años == .
-label variable educ_años "Años de educación formal acumulados"
+        // Mayor crecimiento nominal
+        if (crecNomTotal[i] > crecNomTotal[indiceMayorCrecNomTotal]) {
+            indiceMayorCrecNomTotal = i;
+        }
 
-// 4. Experiencia laboral potencial y experiencia potencial al cuadrado
-//Edad (p208a) - Años de educación - 6 (representa la edad estimada a la que se inicia la etapa escolar)
-gen exper = p208a - educ_años - 6
-replace exper = 0 if exper < 0
-gen exper2 = exper^2
+        // Mayor crecimiento real
+        if (crecRealTotal[i] > crecRealTotal[indiceMayorCrecRealTotal]) {
+            indiceMayorCrecRealTotal = i;
+        }
 
-label variable exper "Experiencia laboral potencial"
-label variable exper2 "Experiencia potencial al cuadrado"
+        // Menor erosion (el menos afectado)
+        if (erosion[i] < erosion[indiceMenorErosion]) {
+            indiceMenorErosion = i;
+        }
+    }
 
-// 5. Logaritmo del salario por hora
+    // 6. Impresion de Resultados
+    cout << endl;
+    cout << "------ RESUMEN FINANCIERO ------" << endl << endl;
 
-* Primero, calculamos el salario por hora neto correcto:
-* Dividimos el ingreso ANUAL (i524a1) entre las horas trabajadas al AÑO (semanales * 52)
-gen sal_hora = i524a1 / (p513t * 52)
-drop if sal_hora <= 0 | sal_hora == .
-gen ln_salario = ln(sal_hora)
+    // Fijamos a 2 decimales
+    cout << fixed << setprecision(2);
 
-label variable ln_salario "Logaritmo natural del salario por hora"
+    cout << "Ingresos reales (precios del mes 1):" << endl;
+    for (int i = 0; i < cantidadTiendas; i++) {
+        cout << "Tienda " << (i + 1) << ":";
+        for (int j = 0; j < cantidadMeses; j++) {
+            // Utilizamos setw(10) para separar las columnas
+            cout << setw(10) << ingresosReales[i][j];
+        }
+        cout << endl;
+    }
+    cout << endl;
 
-// 6. Tabla de estadisticos descriptivos
-sum ln_salario educ_años exper exper2 mujer privado
-save "C:\Users\ALEX\Downloads\Bases METRIA\base_enaho_2024_lista_para_MCO.dta", replace
+    cout << "Crecimiento real promedio mensual (%):" << endl;
+    for (int i = 0; i < cantidadTiendas; i++) {
+        cout << "Tienda " << (i + 1) << ": " << crecRealProm[i] << "%";
+        if (i == indiceMayorCrecRealProm) {
+            cout << " (mayor crecimiento promedio real)";
+        }
+        cout << endl;
+    }
+    cout << endl;
+
+    cout << "Crecimiento nominal total (%):" << endl;
+    for (int i = 0; i < cantidadTiendas; i++) {
+        cout << "Tienda " << (i + 1) << ": " << crecNomTotal[i] << "%";
+        if (i == indiceMayorCrecNomTotal) {
+            cout << " (mayor crecimiento nominal)";
+        }
+        cout << endl;
+    }
+    cout << endl;
+
+    cout << "Crecimiento real total (%):" << endl;
+    for (int i = 0; i < cantidadTiendas; i++) {
+        cout << "Tienda " << (i + 1) << ": " << crecRealTotal[i] << "%";
+        if (i == indiceMayorCrecRealTotal) {
+            cout << " (mayor crecimiento real)";
+        }
+        cout << endl;
+    }
+    cout << endl;
+
+    cout << "Erosion inflacionaria (%):" << endl;
+    for (int i = 0; i < cantidadTiendas; i++) {
+        cout << "Tienda " << (i + 1) << ": " << erosion[i] << "%";
+        if (i == indiceMenorErosion) {
+            cout << " (el menos afectado por el indice de precios)";
+        }
+        cout << endl;
+    }
+
+    return 0;
+}
